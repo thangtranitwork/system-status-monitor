@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<schemalist>
+  <schema id="org.gnome.shell.extensions.system-floating-monitor"
+          path="/org/gnome/shell/extensions/system-floating-monitor/">
+
+    <key name="refresh-interval" type="i">
+      <default>2</default>
+      <summary>Refresh Interval</summary>
+      <description>How often CPU and RAM stats are updated, in seconds (1–60).</description>
+    </key>
+
+    <key name="alert-threshold" type="i">
+      <default>80</default>
+      <summary>Alert Threshold (%)</summary>
+      <description>Send a notification when CPU or RAM usage exceeds this percentage (50–99).</description>
+    </key>
+
+    <key name="alert-cooldown" type="i">
+      <default>60</default>
+      <summary>Alert Cooldown (seconds)</summary>
+      <description>Minimum time between repeated alerts for the same resource (10–600).</description>
+    </key>
+
+  </schema>
+</schemalist>

@@ -1,0 +1,7 @@
+/* Panel label */
+.system-monitor-panel-label {
+    font-size: 12px;
+    font-weight: 600;
+    font-family: 'JetBrains Mono', 'Fira Mono', monospace;
+    padding: 0 6px;
+}

@@ -1,0 +1,8 @@
+{
+  "uuid": "system-floating-monitor@local",
+  "name": "System Status Monitor",
+  "description": "CPU and RAM monitor in the GNOME status bar",
+  "shell-version": ["45", "46", "47", "48", "49", "50"],
+  "version": 2,
+  "settings-schema": "org.gnome.shell.extensions.system-floating-monitor"
+}
