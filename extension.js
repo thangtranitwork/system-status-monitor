@@ -171,13 +171,13 @@ export default class SystemFloatingMonitor extends Extension {
 
     _sendAlert(title, body) {
         const source = this._ensureSource();
-        const notification = new MessageTray.Notification({
+        const notification = new MessageTray.Notification(
             source,
             title,
             body,
-            urgencyLevel: MessageTray.Urgency.CRITICAL,
-            iconName: 'dialog-warning-symbolic',
-        });
+            { gicon: Gio.Icon.new_for_string('dialog-warning-symbolic') }
+        );
+        notification.setUrgency(MessageTray.Urgency.CRITICAL);
         source.addNotification(notification);
     }
 
