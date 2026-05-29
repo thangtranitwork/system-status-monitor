@@ -21,5 +21,12 @@
       <description>Minimum time between repeated alerts for the same resource (10–600).</description>
     </key>
 
+    <key name="language" type="s">
+      <default>'auto'</default>
+      <summary>Language</summary>
+      <description>Display language (auto, en, vi)</description>
+    </key>
+
   </schema>
 </schemalist>
+

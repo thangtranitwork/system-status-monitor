@@ -9,7 +9,9 @@ import * as PanelMenu from 'resource:///org/gnome/shell/ui/panelMenu.js';
 import * as PopupMenu from 'resource:///org/gnome/shell/ui/popupMenu.js';
 import * as MessageTray from 'resource:///org/gnome/shell/ui/messageTray.js';
 
-// Ngưỡng và cooldown được đọc động từ GSettings (xem prefs.js)
+import { t, getLanguage } from './i18n.js';
+
+Gio._promisify(Gio.File.prototype, 'load_contents_async', 'load_contents_finish');
 
 export default class SystemFloatingMonitor extends Extension {
 
@@ -28,6 +30,7 @@ export default class SystemFloatingMonitor extends Extension {
 
         // ── Notification source (dùng lại, không tạo mới mỗi lần) ────────────
         this._notifSource = null;
+        this._notifSourceId = null;
 
         // ── Panel button ──────────────────────────────────────────────────────
         this._indicator = new PanelMenu.Button(0.0, this.metadata.name, false);
@@ -47,9 +50,9 @@ export default class SystemFloatingMonitor extends Extension {
         this._indicator.menu.addMenuItem(this._ramItem);
         this._indicator.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
 
-        const settingsItem = new PopupMenu.PopupMenuItem('Preferences…');
-        settingsItem.connect('activate', () => this.openPreferences());
-        this._indicator.menu.addMenuItem(settingsItem);
+        this._settingsItem = new PopupMenu.PopupMenuItem(t(getLanguage(this._settings), 'preferences'));
+        this._settingsItemId = this._settingsItem.connect('activate', () => this.openPreferences());
+        this._indicator.menu.addMenuItem(this._settingsItem);
 
         // ── Add to status bar ─────────────────────────────────────────────────
         Main.panel.addToStatusArea(this.uuid, this._indicator);
@@ -57,11 +60,11 @@ export default class SystemFloatingMonitor extends Extension {
         // ── React to settings changes ─────────────────────────────────────────
         this._settingsChangedId = this._settings.connect('changed', (s, key) => {
             if (key === 'refresh-interval') this._restartTimer();
-            // alert-threshold / alert-cooldown đọc trực tiếp mỗi lần check → tự động
+            if (key === 'language') this._updateLanguageStrings();
         });
 
         // ── First read + timer ────────────────────────────────────────────────
-        this._updateStats();
+        this._updateStats().catch(err => console.error(err));
         this._startTimer();
     }
 
@@ -76,16 +79,46 @@ export default class SystemFloatingMonitor extends Extension {
             this._settingsChangedId = null;
         }
 
+        if (this._settingsItem && this._settingsItemId) {
+            this._settingsItem.disconnect(this._settingsItemId);
+            this._settingsItemId = null;
+        }
+
+        if (this._notifSource) {
+            if (this._notifSourceId) {
+                this._notifSource.disconnect(this._notifSourceId);
+                this._notifSourceId = null;
+            }
+            this._notifSource.destroy();
+            this._notifSource = null;
+        }
+
+        if (this._panelLabel) {
+            this._panelLabel.destroy();
+            this._panelLabel = null;
+        }
+
+        if (this._cpuItem) {
+            this._cpuItem.destroy();
+            this._cpuItem = null;
+        }
+
+        if (this._ramItem) {
+            this._ramItem.destroy();
+            this._ramItem = null;
+        }
+
+        if (this._settingsItem) {
+            this._settingsItem.destroy();
+            this._settingsItem = null;
+        }
+
         if (this._indicator) {
             this._indicator.destroy();
             this._indicator = null;
         }
 
-        this._panelLabel    = null;
-        this._cpuItem       = null;
-        this._ramItem       = null;
         this._lastCpu       = null;
-        this._notifSource   = null;
         this._settings      = null;
     }
 
@@ -96,26 +129,35 @@ export default class SystemFloatingMonitor extends Extension {
         this._timer = GLib.timeout_add_seconds(
             GLib.PRIORITY_DEFAULT,
             interval,
-            () => { this._updateStats(); return GLib.SOURCE_CONTINUE; }
+            () => {
+                this._updateStats().catch(err => console.error(err));
+                return GLib.SOURCE_CONTINUE;
+            }
         );
     }
 
     _restartTimer() {
-        if (this._timer) { GLib.source_remove(this._timer); this._timer = null; }
+        if (this._timer) {
+            GLib.source_remove(this._timer);
+            this._timer = null;
+        }
         this._startTimer();
     }
 
     // ── System stats ─────────────────────────────────────────────────────────
 
-    _readFile(path) {
+    async _readFileAsync(path) {
         try {
-            const [, bytes] = GLib.file_get_contents(path);
+            const file = Gio.File.new_for_path(path);
+            const [, bytes] = await file.load_contents_async(null);
             return new TextDecoder().decode(bytes);
-        } catch (_) { return ''; }
+        } catch (_) {
+            return '';
+        }
     }
 
-    _getCpuUsage() {
-        const stat = this._readFile('/proc/stat');
+    async _getCpuUsage() {
+        const stat = await this._readFileAsync('/proc/stat');
         const line = stat.split('\n')[0];
         if (!line.startsWith('cpu ')) return 0;
 
@@ -136,8 +178,8 @@ export default class SystemFloatingMonitor extends Extension {
         return Math.round((1 - idleDelta / totalDelta) * 100);
     }
 
-    _getRamUsage() {
-        const info      = this._readFile('/proc/meminfo');
+    async _getRamUsage() {
+        const info      = await this._readFileAsync('/proc/meminfo');
         const total     = Number(info.match(/MemTotal:\s+(\d+)/)?.[1]     || 0);
         const available = Number(info.match(/MemAvailable:\s+(\d+)/)?.[1] || 0);
         if (!total) return 0;
@@ -155,14 +197,16 @@ export default class SystemFloatingMonitor extends Extension {
     _ensureSource() {
         if (this._notifSource) return this._notifSource;
 
+        const lang = getLanguage(this._settings);
         this._notifSource = new MessageTray.Source({
-            title: 'System Status Monitor',
+            title: t(lang, 'notification_title'),
             iconName: 'dialog-warning-symbolic',
         });
 
         // Tự dọn khi source bị destroy từ phía Shell
-        this._notifSource.connect('destroy', () => {
+        this._notifSourceId = this._notifSource.connect('destroy', () => {
             this._notifSource = null;
+            this._notifSourceId = null;
         });
 
         Main.messageTray.add(this._notifSource);
@@ -171,13 +215,13 @@ export default class SystemFloatingMonitor extends Extension {
 
     _sendAlert(title, body) {
         const source = this._ensureSource();
-        const notification = new MessageTray.Notification(
-            source,
-            title,
-            body,
-            { gicon: Gio.Icon.new_for_string('dialog-warning-symbolic') }
-        );
-        notification.setUrgency(MessageTray.Urgency.CRITICAL);
+        const notification = new MessageTray.Notification({
+            source: source,
+            title: title,
+            body: body,
+            gicon: Gio.Icon.new_for_string('dialog-warning-symbolic')
+        });
+        notification.urgency = MessageTray.Urgency.CRITICAL;
         source.addNotification(notification);
     }
 
@@ -189,10 +233,10 @@ export default class SystemFloatingMonitor extends Extension {
         if (pct >= threshold) {
             // Báo nếu: vừa vượt ngưỡng, HOẶC đã hết cooldown mà vẫn còn cao
             if (!isAlerting || (now - lastAlertTime) >= cooldown) {
-                this._sendAlert(
-                    `⚠️ ${label} cao: ${pct}%`,
-                    `${label} đang ở mức ${pct}% — vượt ngưỡng ${threshold}%`
-                );
+                const lang = getLanguage(this._settings);
+                const title = t(lang, 'alert_title', { label, pct });
+                const body = t(lang, 'alert_body', { label, pct, threshold });
+                this._sendAlert(title, body);
                 return { alerting: true, lastAlert: now };
             }
             return { alerting: true, lastAlert: lastAlertTime };
@@ -202,27 +246,47 @@ export default class SystemFloatingMonitor extends Extension {
         return { alerting: false, lastAlert: lastAlertTime };
     }
 
+    _updateLanguageStrings() {
+        const lang = getLanguage(this._settings);
+        
+        if (this._settingsItem) {
+            this._settingsItem.label.set_text(t(lang, 'preferences'));
+        }
+        if (this._notifSource) {
+            this._notifSource.title = t(lang, 'notification_title');
+        }
+        this._updateStats().catch(err => console.error(err));
+    }
+
     // ── Update display ────────────────────────────────────────────────────────
 
-    _updateStats() {
+    async _updateStats() {
         if (!this._panelLabel) return;
 
-        const cpu = this._getCpuUsage();
-        const ram = this._getRamUsage();
+        const cpu = await this._getCpuUsage();
+        const ram = await this._getRamUsage();
 
         // Panel text
         this._panelLabel.set_text(`CPU ${cpu}%  RAM ${ram}%`);
 
+        const threshold = this._settings.get_int('alert-threshold');
+        const cpuColor = this._colorFor(cpu, threshold);
+        const ramColor = this._colorFor(ram, threshold);
+        const maxColor = cpu >= ram ? cpuColor : ramColor;
+
+        // Colorize top panel label
+        this._panelLabel.set_style(`color: ${maxColor}; font-weight: bold;`);
+
+        const lang = getLanguage(this._settings);
+
         // Dropdown
         if (this._cpuItem) {
-            const threshold = this._settings.get_int('alert-threshold');
-            this._cpuItem.label.set_text(`CPU: ${cpu}%`);
-            this._cpuItem.label.set_style(`color: ${this._colorFor(cpu, threshold)}; font-weight: bold;`);
+            this._cpuItem.label.set_text(t(lang, 'cpu_label', { pct: cpu }));
+            this._cpuItem.label.set_style(`color: ${cpuColor}; font-weight: bold;`);
         }
         if (this._ramItem) {
-            const threshold = this._settings.get_int('alert-threshold');
-            this._ramItem.label.set_text(`RAM: ${ram}%`);
-            this._ramItem.label.set_style(`color: ${this._colorFor(ram, threshold)}; font-weight: bold;`);
+            this._ramItem.label.set_text(t(lang, 'ram_label', { pct: ram }));
+            this._ramItem.label.set_style(`color: ${ramColor}; font-weight: bold;`);
         }
 
         // Cảnh báo 80%

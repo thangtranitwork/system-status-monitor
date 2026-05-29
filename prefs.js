@@ -3,30 +3,25 @@ import Gtk from 'gi://Gtk';
 import Gio from 'gi://Gio';
 
 import { ExtensionPreferences } from 'resource:///org/gnome/Shell/Extensions/js/extensions/prefs.js';
+import { t, getLanguage } from './i18n.js';
 
 export default class SystemFloatingMonitorPreferences extends ExtensionPreferences {
 
     fillPreferencesWindow(window) {
         const settings = this.getSettings();
 
-        window.set_default_size(540, 400);
+        window.set_default_size(540, 450);
 
         const page = new Adw.PreferencesPage({
-            title: 'General',
             icon_name: 'preferences-system-symbolic',
         });
         window.add(page);
 
         // ── Group: Update ─────────────────────────────────────────────────────
-        const updateGroup = new Adw.PreferencesGroup({
-            title: 'Update Settings',
-            description: 'Configure how often system stats are refreshed',
-        });
+        const updateGroup = new Adw.PreferencesGroup();
         page.add(updateGroup);
 
         const intervalRow = new Adw.SpinRow({
-            title: 'Refresh Interval',
-            subtitle: 'Seconds between each CPU & RAM update (1 – 60)',
             adjustment: new Gtk.Adjustment({
                 lower: 1, upper: 60,
                 step_increment: 1, page_increment: 5,
@@ -37,15 +32,10 @@ export default class SystemFloatingMonitorPreferences extends ExtensionPreferenc
         updateGroup.add(intervalRow);
 
         // ── Group: Alerts ─────────────────────────────────────────────────────
-        const alertGroup = new Adw.PreferencesGroup({
-            title: 'Alert Settings',
-            description: 'Get notified when CPU or RAM is running high',
-        });
+        const alertGroup = new Adw.PreferencesGroup();
         page.add(alertGroup);
 
         const thresholdRow = new Adw.SpinRow({
-            title: 'Alert Threshold',
-            subtitle: 'Send notification when usage exceeds this % (50 – 99)',
             adjustment: new Gtk.Adjustment({
                 lower: 50, upper: 99,
                 step_increment: 1, page_increment: 5,
@@ -56,8 +46,6 @@ export default class SystemFloatingMonitorPreferences extends ExtensionPreferenc
         alertGroup.add(thresholdRow);
 
         const cooldownRow = new Adw.SpinRow({
-            title: 'Alert Cooldown',
-            subtitle: 'Minimum seconds between repeated alerts (10 – 600)',
             adjustment: new Gtk.Adjustment({
                 lower: 10, upper: 600,
                 step_increment: 10, page_increment: 60,
@@ -66,5 +54,66 @@ export default class SystemFloatingMonitorPreferences extends ExtensionPreferenc
         });
         settings.bind('alert-cooldown', cooldownRow, 'value', Gio.SettingsBindFlags.DEFAULT);
         alertGroup.add(cooldownRow);
+
+        // ── Group: Language ───────────────────────────────────────────────────
+        const languageGroup = new Adw.PreferencesGroup();
+        page.add(languageGroup);
+
+        const languageRow = new Adw.ComboRow({
+            model: new Gtk.StringList({
+                strings: ['System Default / Mặc định', 'English', 'Tiếng Việt']
+            }),
+        });
+        languageGroup.add(languageRow);
+
+        const langKeys = ['auto', 'en', 'vi'];
+        const currentLang = settings.get_string('language');
+        let selectedIndex = langKeys.indexOf(currentLang);
+        if (selectedIndex === -1) selectedIndex = 0;
+        languageRow.selected = selectedIndex;
+
+        const langNotifyId = languageRow.connect('notify::selected', () => {
+            const index = languageRow.selected;
+            settings.set_string('language', langKeys[index]);
+        });
+
+        // ── Update translations dynamically ────────────────────────────────────
+        const updatePrefsStrings = () => {
+            const lang = getLanguage(settings);
+            page.title = t(lang, 'general');
+            
+            updateGroup.title = t(lang, 'update_settings');
+            updateGroup.description = t(lang, 'update_settings_desc');
+            
+            intervalRow.title = t(lang, 'refresh_interval');
+            intervalRow.subtitle = t(lang, 'refresh_interval_desc');
+
+            alertGroup.title = t(lang, 'alert_settings');
+            alertGroup.description = t(lang, 'alert_settings_desc');
+
+            thresholdRow.title = t(lang, 'alert_threshold');
+            thresholdRow.subtitle = t(lang, 'alert_threshold_desc');
+
+            cooldownRow.title = t(lang, 'alert_cooldown');
+            cooldownRow.subtitle = t(lang, 'alert_cooldown_desc');
+
+            languageGroup.title = t(lang, 'language');
+            languageGroup.description = t(lang, 'language_desc');
+            languageRow.title = t(lang, 'language');
+            languageRow.subtitle = t(lang, 'language_desc');
+        };
+
+        const changedId = settings.connect('changed::language', updatePrefsStrings);
+        
+        window.connect('destroy', () => {
+            if (changedId) {
+                settings.disconnect(changedId);
+            }
+            if (languageRow && langNotifyId) {
+                languageRow.disconnect(langNotifyId);
+            }
+        });
+
+        updatePrefsStrings();
     }
 }
